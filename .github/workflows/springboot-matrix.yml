@@ -1,4 +1,4 @@
-name: Spring Boot Matrix CI
+name: Spring Boot Matrix CI with Error Handling
 
 on:
   push:
@@ -42,17 +42,43 @@ jobs:
           distribution: temurin
 
       - name: Build with Maven
-        run: mvn clean package -DskipTests
+        run: |
+          echo "Building project..."
+          mvn clean package -DskipTests
+        continue-on-error: false
 
       - name: Run tests
-        run: mvn test
+        run: |
+          echo "Running tests..."
+          if ! mvn test; then
+            echo "❌ Tests failed!"
+            exit 1
+          fi
 
       - name: Run Spring Boot App
-        run: mvn spring-boot:run &
+        run: |
+          echo "Starting Spring Boot application..."
+          nohup mvn spring-boot:run > springboot.log 2>&1 &
+          sleep 20
 
-      - name: Wait for app to start
-        run: sleep 20
+      - name: Check if app started
+        run: |
+          if ! curl -s http://localhost:8080/api/v1/students > /dev/null; then
+            echo "❌ Spring Boot app failed to start or API not reachable."
+            echo "Logs:"
+            cat springboot.log
+            exit 1
+          else
+            echo "✅ Spring Boot app is running."
+          fi
 
       - name: Test API endpoint
         run: |
-          curl -v http://localhost:8080/api/v1/students || echo "API not ready yet"
+          echo "Testing /students API..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/students)
+          if [ "$response" -ne 200 ]; then
+            echo "❌ API test failed with status code $response"
+            exit 1
+          else
+            echo "✅ API test passed with status code $response"
+          fi
